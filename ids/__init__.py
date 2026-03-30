@@ -1,0 +1,1 @@
+"""IDS core package."""
