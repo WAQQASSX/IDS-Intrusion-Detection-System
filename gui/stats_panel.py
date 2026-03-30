@@ -1,76 +1,146 @@
-"""Statistics panel showing counters and threat ratio bar."""
+"""Modern statistics panel widget."""
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox, QProgressBar
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QFrame,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QColor
+
+COLOR = {
+    "bg":          "#0d1117",
+    "surface":     "#161b22",
+    "surface2":    "#1c2230",
+    "border":      "#30363d",
+    "text":        "#e6edf3",
+    "text_muted":  "#8b949e",
+    "text_faint":  "#484f58",
+    "primary":     "#00d4aa",
+    "danger":      "#f85149",
+    "success":     "#3fb950",
+    "warning":     "#e3b341",
+    "blue":        "#58a6ff",
+}
 
 
-class StatsPanel(QWidget):
-    def __init__(self, parent=None):
+class MiniStatRow(QWidget):
+    """A labelled value row with animated progress bar."""
+    def __init__(self, label: str, accent: str, parent=None):
         super().__init__(parent)
-        self._total     = 0
-        self._normal    = 0
-        self._malicious = 0
-        self._build_ui()
+        self._accent = accent
+        self._total  = 0
 
-    def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
 
-        grp = QGroupBox("📊 Session Statistics")
-        grp_layout = QVBoxLayout(grp)
-        self._lbl_total     = self._counter_label("Total Packets", "0", "#2980b9")
-        self._lbl_normal    = self._counter_label("Normal",        "0", "#27ae60")
-        self._lbl_malicious = self._counter_label("Malicious",     "0", "#e74c3c")
-        self._lbl_rate      = self._counter_label("Threat Rate",   "0%", "#8e44ad")
-        for lbl in [self._lbl_total, self._lbl_normal, self._lbl_malicious, self._lbl_rate]:
-            grp_layout.addWidget(lbl)
-        layout.addWidget(grp)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(
+            f"color:{COLOR['text_muted']};font-size:11px;"
+        )
+        self._val_lbl = QLabel("0")
+        self._val_lbl.setStyleSheet(
+            f"color:{accent};font-size:18px;font-weight:800;"
+            "font-variant-numeric:tabular-nums;"
+        )
+        top.addWidget(lbl)
+        top.addStretch()
+        top.addWidget(self._val_lbl)
+        layout.addLayout(top)
 
-        bar_grp = QGroupBox("🔴 Threat Ratio")
-        bar_layout = QVBoxLayout(bar_grp)
         self._bar = QProgressBar()
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
-        self._bar.setStyleSheet(
-            "QProgressBar { border:1px solid #ccc; border-radius:4px; background:#ecf0f1; }"
-            "QProgressBar::chunk { background:#e74c3c; border-radius:4px; }"
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(4)
+        self._bar.setStyleSheet(f"""
+            QProgressBar {{
+                background:{COLOR['surface2']};
+                border-radius:2px;
+                border:none;
+            }}
+            QProgressBar::chunk {{
+                background:{accent};
+                border-radius:2px;
+            }}
+        """)
+        layout.addWidget(self._bar)
+
+    def update(self, value: int, total: int):
+        self._val_lbl.setText(str(value))
+        pct = int((value / total * 100)) if total > 0 else 0
+        self._bar.setValue(pct)
+
+
+class StatsPanel(QWidget):
+    """Sidebar statistics panel — protocol breakdown + detection counts."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._counts = {"Normal": 0, "Malicious": 0}
+        self._proto  = {"TCP": 0, "UDP": 0, "ICMP": 0, "OTHER": 0}
+        self._total  = 0
+        self._build()
+
+    def _build(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        # Detection section header
+        det_title = QLabel("DETECTION OVERVIEW")
+        det_title.setStyleSheet(
+            f"color:{COLOR['text_faint']};font-size:9px;"
+            f"font-weight:700;letter-spacing:1.5px;"
         )
-        bar_layout.addWidget(self._bar)
-        layout.addWidget(bar_grp)
+        layout.addWidget(det_title)
+
+        self._row_normal = MiniStatRow("Normal traffic", COLOR["success"])
+        layout.addWidget(self._row_normal)
+
+        self._row_malicious = MiniStatRow("Malicious traffic", COLOR["danger"])
+        layout.addWidget(self._row_malicious)
+
+        # Divider
+        div = QFrame()
+        div.setFrameShape(QFrame.HLine)
+        div.setStyleSheet(f"color:{COLOR['border']};margin:4px 0;")
+        layout.addWidget(div)
+
+        # Protocol section header
+        proto_title = QLabel("PROTOCOL BREAKDOWN")
+        proto_title.setStyleSheet(
+            f"color:{COLOR['text_faint']};font-size:9px;"
+            f"font-weight:700;letter-spacing:1.5px;"
+        )
+        layout.addWidget(proto_title)
+
+        self._row_tcp   = MiniStatRow("TCP",   COLOR["blue"])
+        self._row_udp   = MiniStatRow("UDP",   "#a86fdf")
+        self._row_icmp  = MiniStatRow("ICMP",  COLOR["warning"])
+        self._row_other = MiniStatRow("Other", COLOR["text_muted"])
+        for row in [self._row_tcp, self._row_udp, self._row_icmp, self._row_other]:
+            layout.addWidget(row)
+
         layout.addStretch()
 
-    def update_stats(self, label: str):
+    def update_stats(self, label: str, protocol: str = "OTHER"):
         self._total += 1
-        if label == "Normal":
-            self._normal += 1
-        else:
-            self._malicious += 1
-        rate = (self._malicious / self._total * 100) if self._total else 0
-        self._lbl_total.findChild(QLabel, "value").setText(str(self._total))
-        self._lbl_normal.findChild(QLabel, "value").setText(str(self._normal))
-        self._lbl_malicious.findChild(QLabel, "value").setText(str(self._malicious))
-        self._lbl_rate.findChild(QLabel, "value").setText(f"{rate:.1f}%")
-        self._bar.setValue(int(rate))
+        self._counts[label] = self._counts.get(label, 0) + 1
+        self._proto[protocol] = self._proto.get(protocol, 0) + 1
+
+        self._row_normal.update(self._counts.get("Normal", 0),    self._total)
+        self._row_malicious.update(self._counts.get("Malicious", 0), self._total)
+        self._row_tcp.update(self._proto["TCP"],   self._total)
+        self._row_udp.update(self._proto["UDP"],   self._total)
+        self._row_icmp.update(self._proto["ICMP"],  self._total)
+        self._row_other.update(self._proto["OTHER"], self._total)
 
     def reset(self):
-        self._total = self._normal = self._malicious = 0
-        for lbl in [self._lbl_total, self._lbl_normal, self._lbl_malicious, self._lbl_rate]:
-            lbl.findChild(QLabel, "value").setText("0")
-        self._bar.setValue(0)
-
-    @staticmethod
-    def _counter_label(title: str, value: str, color: str) -> QWidget:
-        w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(0, 2, 0, 2)
-        lbl_title = QLabel(title + ":")
-        lbl_title.setStyleSheet("font-weight: bold;")
-        lbl_value = QLabel(value)
-        lbl_value.setObjectName("value")
-        lbl_value.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: bold;")
-        lbl_value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        h.addWidget(lbl_title)
-        h.addStretch()
-        h.addWidget(lbl_value)
-        return w
+        self._counts = {"Normal": 0, "Malicious": 0}
+        self._proto  = {"TCP": 0, "UDP": 0, "ICMP": 0, "OTHER": 0}
+        self._total  = 0
+        for row in [
+            self._row_normal, self._row_malicious,
+            self._row_tcp, self._row_udp, self._row_icmp, self._row_other,
+        ]:
+            row.update(0, 0)
